@@ -35,5 +35,3 @@ Tech Stack: HTML5, Tailwind CSS, Vanilla JavaScript
 Mapping: Leaflet.js
 
 Features: Responsive design, simulated IoT events, localization.
-
-🚀 How to Run the Demo App

@@ -1,0 +1,424 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pet Guardian - IoT Dashboard</title>
+    
+    <!-- CSS & Fonts -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Noto+Sans+JP:wght@400;700&display=swap" rel="stylesheet">
+    <script src="https://unpkg.com/@phosphor-icons/web"></script>
+    
+    <!-- Mapping Library -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+    <style>
+        body { font-family: 'Inter', 'Noto Sans JP', sans-serif; background-color: #f8fafc; }
+        .page-section { display: none; height: 100%; width: 100%; }
+        .page-section.active { display: flex; animation: fadeIn 0.5s ease-in-out; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        
+        #tracking-map { height: 100%; width: 100%; z-index: 1; }
+        #safe-zone-map { height: 200px; width: 100%; border-radius: 0.75rem; overflow: hidden; }
+        
+        .modal { opacity: 0; pointer-events: none; transition: all 0.3s ease; }
+        .modal.open { opacity: 1; pointer-events: auto; }
+        .modal-content { transform: scale(0.95); transition: all 0.3s ease; }
+        .modal.open .modal-content { transform: scale(1); }
+
+        .photo-upload-container {
+            width: 100px; height: 100px; border-radius: 50%; position: relative; overflow: hidden;
+            margin: 0 auto; transition: all 0.3s ease; border: 4px solid white;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1); cursor: pointer;
+        }
+        .photo-upload-container:hover { transform: scale(1.05); border-color: #6366f1; }
+        .upload-overlay {
+            position: absolute; inset: 0; background: rgba(0,0,0,0.3);
+            display: flex; align-items: center; justify-content: center; opacity: 0; transition: opacity 0.2s;
+        }
+        .photo-upload-container:hover .upload-overlay { opacity: 1; }
+        
+        .input-field {
+            width: 100%; padding: 0.5rem 0.75rem; background-color: #f8fafc; border: 1px solid #e2e8f0;
+            border-radius: 0.5rem; outline: none; transition: all 0.2s; font-size: 0.875rem;
+        }
+        .input-field:focus { border-color: #6366f1; background-color: #fff; box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.1); }
+        .label-text { font-size: 0.7rem; font-weight: 700; text-transform: uppercase; color: #64748b; margin-bottom: 0.25rem; display: block; }
+        
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: #f1f1f1; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+        
+        #lang-dropdown.hidden { opacity: 0; transform: scale(0.95); pointer-events: none; display: block; }
+        #lang-dropdown:not(.hidden) { opacity: 1; transform: scale(1); pointer-events: auto; }
+    </style>
+</head>
+<body class="h-screen overflow-hidden text-slate-800 relative" onclick="closeDropdownOnClickOutside(event)">
+
+    <!-- LANGUAGE SELECTOR -->
+    <div class="absolute top-6 right-6 z-50">
+        <div class="relative">
+            <button id="lang-btn" onclick="toggleLangDropdown(event)" class="flex items-center gap-2 bg-white/90 backdrop-blur px-4 py-2 rounded-full shadow-sm border border-slate-200 hover:border-indigo-500 transition-colors z-50 relative">
+                <i class="ph-bold ph-globe text-indigo-600"></i>
+                <span id="current-lang" class="text-sm font-bold text-slate-700">English</span>
+                <i id="lang-caret" class="ph-bold ph-caret-down text-xs text-slate-400 transition-transform duration-200"></i>
+            </button>
+            <div id="lang-dropdown" class="absolute right-0 mt-2 w-48 bg-white rounded-xl shadow-xl border border-slate-100 overflow-hidden hidden z-40 transition-all duration-200 origin-top-right">
+                <div class="max-h-64 overflow-y-auto" id="lang-options"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 1. LOGIN SECTION -->
+    <section id="auth-section" class="page-section active items-center justify-center bg-slate-50 relative overflow-hidden">
+        <div class="absolute top-[-10%] left-[-10%] w-96 h-96 bg-indigo-400/20 rounded-full blur-3xl"></div>
+        <div class="absolute bottom-[-10%] right-[-10%] w-96 h-96 bg-pink-400/20 rounded-full blur-3xl"></div>
+        <div class="bg-white/80 backdrop-blur-xl p-8 md:p-10 rounded-3xl shadow-2xl max-w-md w-full relative z-10 border border-white">
+            <div class="text-center mb-8">
+                <div class="w-16 h-16 bg-indigo-600 text-white rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-lg">
+                    <i class="ph-fill ph-paw-print text-3xl"></i>
+                </div>
+                <h1 class="text-3xl font-bold text-slate-800 mb-2" data-key="brand_title">Pet Guardian</h1>
+                <p class="text-slate-500" data-key="brand_subtitle">Smart protection</p>
+            </div>
+            <form onsubmit="event.preventDefault(); handleAuth();" class="space-y-5">
+                <div>
+                    <label class="label-text" data-key="lbl_email">Email</label>
+                    <input type="email" value="demo@user.com" class="input-field" placeholder="name@email.com">
+                </div>
+                <div>
+                    <label class="label-text" data-key="lbl_password">Password</label>
+                    <input type="password" value="password" class="input-field" placeholder="••••••••">
+                </div>
+                <button type="submit" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3.5 rounded-xl shadow-lg transition-all">
+                    <span data-key="btn_continue">Login</span>
+                </button>
+            </form>
+        </div>
+    </section>
+
+    <!-- 2. DASHBOARD SECTION -->
+    <section id="home-section" class="page-section flex-col bg-slate-50">
+        <nav class="bg-white border-b border-slate-200 px-6 py-4 flex justify-between items-center sticky top-0 z-30 shadow-sm">
+            <div class="flex items-center gap-3">
+                <div class="bg-indigo-100 p-2 rounded-lg text-indigo-600"><i class="ph-bold ph-house text-xl"></i></div>
+                <h1 class="font-bold text-slate-800 text-lg" data-key="dash_title">Dashboard</h1>
+            </div>
+            <button onclick="logout()" class="text-slate-400 hover:text-red-500 transition-colors"><i class="ph-bold ph-sign-out text-xl"></i></button>
+        </nav>
+        <div class="flex-1 p-6 md:p-10 max-w-5xl mx-auto w-full overflow-y-auto">
+            <div class="flex justify-between items-center mb-8">
+                <h2 class="text-3xl font-bold text-slate-800" data-key="my_pets">My Pets</h2>
+                <button onclick="openModal()" class="bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-3 rounded-xl font-bold shadow-lg flex items-center gap-2">
+                    <i class="ph-bold ph-plus-circle text-xl"></i> <span data-key="btn_add_pet">New Pet</span>
+                </button>
+            </div>
+            <div id="pet-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                <div id="empty-state" class="col-span-full bg-white rounded-3xl p-12 text-center border border-dashed border-slate-300">
+                    <i class="ph-duotone ph-dog text-5xl text-slate-300 mb-4"></i>
+                    <h3 class="text-xl font-bold text-slate-700" data-key="no_pets_title">No Pets Found</h3>
+                    <p class="text-slate-400 text-sm mt-2" data-key="no_pets_desc">Register a collar to begin tracking.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- 3. MAP TRACKING SECTION -->
+    <section id="map-section" class="page-section flex-col bg-slate-100">
+        <nav class="bg-white border-b border-slate-200 px-4 py-3 flex justify-between items-center z-20 shadow-sm">
+            <button onclick="goHome()" class="flex items-center gap-2 text-slate-600 hover:text-indigo-600 transition font-bold bg-slate-50 px-3 py-1.5 rounded-lg border border-slate-200">
+                <i class="ph-bold ph-caret-left"></i> <span data-key="btn_back">Back</span>
+            </button>
+            <h1 class="font-bold text-slate-800 text-lg flex items-center gap-2">
+                <span class="w-2 h-2 bg-green-500 rounded-full animate-pulse"></span>
+                <span id="tracking-name">Pet Name</span>
+            </h1>
+            <div class="w-16"></div>
+        </nav>
+        <div class="flex-1 relative p-4 h-full">
+            <div class="w-full h-full rounded-2xl shadow-inner border border-slate-300 overflow-hidden relative">
+                <div id="tracking-map"></div>
+                
+                <div id="alert-overlay" class="hidden absolute top-6 left-1/2 -translate-x-1/2 bg-red-500 text-white pl-4 pr-6 py-3 rounded-full shadow-xl animate-bounce font-bold z-[1000] flex items-center gap-3">
+                    <i class="ph-fill ph-warning text-lg"></i> <span data-key="alert_zone_title">Zone Alert!</span>
+                </div>
+                <div class="absolute bottom-6 left-1/2 -translate-x-1/2 bg-white/90 backdrop-blur-md p-2 rounded-2xl shadow-xl flex gap-2 z-[1000]">
+                    <button onclick="simulateBark()" class="flex flex-col items-center justify-center w-16 h-14 rounded-xl hover:bg-orange-50 text-orange-500 transition">
+                        <i class="ph-fill ph-speaker-high text-xl"></i> <span class="text-[10px] font-bold" data-key="sim_bark">Bark</span>
+                    </button>
+                    <div class="w-px bg-slate-200 my-1"></div>
+                    <button onclick="simulateMove()" class="flex flex-col items-center justify-center w-16 h-14 rounded-xl hover:bg-red-50 text-red-500 transition">
+                        <i class="ph-fill ph-person-simple-run text-xl"></i> <span class="text-[10px] font-bold" data-key="sim_out">Out</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- REGISTER MODAL -->
+    <div id="pet-modal" class="modal fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 overflow-y-auto">
+        <div class="modal-content bg-white w-full max-w-2xl rounded-3xl shadow-2xl overflow-hidden my-8">
+            <div class="bg-indigo-600 p-6 text-center relative">
+                <button onclick="closeModal()" class="absolute top-4 right-4 text-white/60 hover:text-white"><i class="ph-bold ph-x text-2xl"></i></button>
+                <h2 class="text-2xl font-bold text-white relative z-10" data-key="modal_title">Register New Pet</h2>
+            </div>
+            <form id="pet-register-form" class="p-6 md:p-8" onsubmit="event.preventDefault(); savePet();">
+                <div class="mb-8 text-center">
+                    <div class="photo-upload-container bg-indigo-50" onclick="document.getElementById('pet-photo').click()">
+                        <img id="preview-image" src="https://cdn-icons-png.flaticon.com/512/616/616408.png" class="w-full h-full object-cover transition-opacity duration-300">
+                        <div class="upload-overlay"><i class="ph-bold ph-camera text-white text-2xl"></i></div>
+                    </div>
+                    <input type="file" id="pet-photo" class="hidden" accept="image/*" onchange="previewPhoto(this)">
+                    <p class="text-xs text-slate-400 mt-2" data-key="lbl_upload">Tap to upload photo</p>
+                </div>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div class="md:col-span-2 space-y-4">
+                        <div>
+                            <label class="label-text" data-key="lbl_pet_name">Name *</label>
+                            <input id="new-pet-name" type="text" class="input-field" placeholder="e.g., Rizz" required>
+                        </div>
+                        <div>
+                            <label class="label-text" data-key="lbl_collar_id">Collar ID *</label>
+                            <input id="new-collar-id" type="text" class="input-field border-indigo-200 bg-indigo-50/50 font-mono uppercase tracking-widest" placeholder="C-XXXX" required>
+                            <p class="text-[10px] text-slate-400 mt-1 ml-1" data-key="id_help">Found on back of device</p>
+                        </div>
+                        <div>
+                            <label class="label-text" data-key="lbl_safe_zone">Safe Zone</label>
+                            <div id="safe-zone-map"></div>
+                            <p class="text-[10px] text-slate-400 mt-1.5 text-center" data-key="map_help">Drag map to center</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="mt-8 flex gap-4 pt-4 border-t border-slate-100">
+                    <button type="button" onclick="closeModal()" class="flex-1 py-3 rounded-xl border border-slate-200 text-slate-600 font-bold hover:bg-slate-50 transition" data-key="btn_cancel">Cancel</button>
+                    <button type="submit" class="flex-[2] py-3 rounded-xl bg-indigo-600 text-white font-bold shadow-lg hover:bg-indigo-700 transition-all flex items-center justify-center gap-2">
+                        <span data-key="btn_save">Register</span> <i class="ph-bold ph-check-circle text-xl"></i>
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- BARK ALERT MODAL -->
+    <div id="bark-modal" class="hidden fixed inset-0 bg-slate-900/60 backdrop-blur-md z-[2000] flex items-center justify-center p-6">
+        <div class="bg-white rounded-3xl shadow-2xl max-w-sm w-full overflow-hidden relative animate-[bounceIn_0.5s_ease]">
+            <button onclick="closeBarkModal()" class="absolute top-4 right-4 bg-black/20 hover:bg-black/40 text-white p-1 rounded-full transition z-20"><i class="ph-bold ph-x"></i></button>
+            <div class="bg-orange-500 text-white p-6 pb-12 relative">
+                <h3 class="font-bold text-2xl flex items-center gap-2 relative z-10" data-key="alert_bark_title">Alert!</h3>
+            </div>
+            <div class="px-6 -mt-8 relative z-10">
+                <div class="rounded-2xl overflow-hidden shadow-lg border-4 border-white bg-slate-200 h-48 relative">
+                    <img src="https://images.unsplash.com/photo-1576201836106-db1758fd1c97?ixlib=rb-4.0.3&auto=format&fit=crop&w=800&q=80" class="w-full h-full object-cover">
+                </div>
+            </div>
+            <div class="p-6 pt-4 text-center">
+                <p class="text-slate-600 font-medium text-lg mb-6" data-key="alert_bark_msg">Barking detected.</p>
+                <button onclick="closeBarkModal()" class="w-full bg-orange-500 hover:bg-orange-600 text-white py-3 rounded-xl font-bold shadow-lg transition-colors" data-key="btn_view_live">View Live</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // --- TRANSLATIONS (English, Japanese, Myanmar) ---
+        const translations = {
+            en: {
+                brand_title: "Pet Guardian", brand_subtitle: "Smart protection for your furry family members.",
+                lbl_email: "Email", lbl_password: "Password", btn_continue: "Login",
+                dash_title: "Dashboard", my_pets: "My Pets", btn_add_pet: "Register New Pet", 
+                no_pets_title: "No Pets Found", no_pets_desc: "Register a collar to begin tracking.",
+                modal_title: "Register Device", lbl_pet_name: "Pet Name", lbl_collar_id: "Collar ID", 
+                id_help: "Found on back of device", lbl_safe_zone: "Set Safe Zone", map_help: "Drag map to center", 
+                btn_save: "Register", btn_cancel: "Cancel", btn_back: "Back", alert_bark_title: "Alert!", 
+                alert_bark_msg: "Barking detected.", alert_zone_title: "Zone Alert!", btn_view_live: "View Live",
+                lbl_upload: "Tap to upload photo", sim_bark: "Bark", sim_out: "Out", track_now: "Track Now"
+            },
+            jp: {
+                brand_title: "Pet Guardian", brand_subtitle: "大切な家族を守るスマートテクノロジー",
+                lbl_email: "メールアドレス", lbl_password: "パスワード", btn_continue: "ログイン",
+                dash_title: "ダッシュボード", my_pets: "マイペット", btn_add_pet: "新規登録", 
+                no_pets_title: "登録なし", no_pets_desc: "まだデバイスが登録されていません。",
+                modal_title: "デバイス登録", lbl_pet_name: "名前", lbl_collar_id: "首輪ID", 
+                id_help: "箱の裏にあるIDを入力", lbl_safe_zone: "セーフゾーン設定", map_help: "地図をドラッグして中心に設定", 
+                btn_save: "登録する", btn_cancel: "キャンセル", btn_back: "戻る", alert_bark_title: "警告！", 
+                alert_bark_msg: "激しい鳴き声を検知しました。", alert_zone_title: "エリア外アラート！", btn_view_live: "ライブ確認",
+                lbl_upload: "写真をアップロード", sim_bark: "吠える", sim_out: "外出", track_now: "追跡する"
+            },
+            mm: {
+                brand_title: "Pet Guardian", brand_subtitle: "သင့်အချစ်တော်လေးတွေကို စောင့်ရှောက်ဖို့ အကောင်းဆုံး နည်းပညာ",
+                lbl_email: "အီးမေးလ်", lbl_password: "စကားဝှက်", btn_continue: "ဝင်ရောက်မည်",
+                dash_title: "ပင်မစာမျက်နှာ", my_pets: "တိရစ္ဆာန်များ", btn_add_pet: "အသစ်ထည့်မည်", 
+                no_pets_title: "စာရင်းမရှိသေးပါ", no_pets_desc: "ကိရိယာတစ်ခုမှ မရှိသေးပါ။ အပေါ်က ခလုတ်ကိုနှိပ်ပြီး စထည့်ပါ",
+                modal_title: "ကိရိယာ ချိတ်ဆက်ရန်", lbl_pet_name: "အမည်", lbl_collar_id: "Collar ID", 
+                id_help: "ဘူးခွံပေါ်တွင်ပါသော ID ကိုရိုက်ထည့်ပါ", lbl_safe_zone: "ဘေးကင်းဇုန် သတ်မှတ်ရန်", map_help: "မြေပုံကို အိမ်နေရာသို့ ရွှေ့ပါ", 
+                btn_save: "စာရင်းသွင်းမည်", btn_cancel: "မလုပ်တော့ပါ", btn_back: "နောက်သို့", alert_bark_title: "ဟောင်သံ သတိပေးချက်!", 
+                alert_bark_msg: "သင့်ခွေးလေး ကျယ်လောင်စွာ ဟောင်နေပါသည်။", alert_zone_title: "ဇုန်ကျော် သတိပေးချက်!", btn_view_live: "ကြည့်မယ်",
+                lbl_upload: "ပုံတင်ရန် နှိပ်ပါ", sim_bark: "ဟောင်သံ", sim_out: "အပြင်ထွက်", track_now: "ကြည့်မည်"
+            }
+        };
+
+        // --- APP STATE ---
+        let pets = [];
+        let activePetIndex = null;
+        let trackingMap = null, safeZoneMap = null;
+        let modalCircle, modalMarker, trackingMarker, trackingCircle;
+        const DEFAULT_POS = [35.6895, 139.6917]; // Default: Tokyo
+        let tempSafeZone = { lat: DEFAULT_POS[0], lng: DEFAULT_POS[1] };
+        let currentLang = 'en';
+
+        // --- LANGUAGE LOGIC ---
+        function initLangSelector() {
+            const container = document.getElementById('lang-options');
+            const langs = [
+                { code: 'en', label: '🇺🇸 English' }, 
+                { code: 'jp', label: '🇯🇵 日本語' },
+                { code: 'mm', label: '🇲🇲 မြန်မာ' }
+            ];
+            container.innerHTML = langs.map(l => 
+                `<button onclick="selectLang('${l.code}')" class="w-full text-left px-4 py-3 text-sm hover:bg-slate-50 flex items-center gap-2 font-medium text-slate-600 hover:text-indigo-600 transition-colors">${l.label}</button>`
+            ).join('');
+        }
+        
+        function toggleLangDropdown(e) { e.stopPropagation(); document.getElementById('lang-dropdown').classList.toggle('hidden'); document.getElementById('lang-caret').style.transform = document.getElementById('lang-dropdown').classList.contains('hidden') ? 'rotate(0deg)' : 'rotate(180deg)'; }
+        function closeDropdown() { document.getElementById('lang-dropdown').classList.add('hidden'); document.getElementById('lang-caret').style.transform = 'rotate(0deg)'; }
+        function closeDropdownOnClickOutside(e) { if (!document.getElementById('lang-dropdown').contains(e.target) && !document.getElementById('lang-btn').contains(e.target)) closeDropdown(); }
+        function selectLang(code) { changeLang(code); closeDropdown(); }
+        
+        function changeLang(lang) {
+            currentLang = lang;
+            const langLabels = { 'en': 'English', 'jp': '日本語', 'mm': 'မြန်မာ' };
+            document.getElementById('current-lang').textContent = langLabels[lang];
+            
+            if (translations[lang]) {
+                const t = translations[lang];
+                document.querySelectorAll('[data-key]').forEach(el => {
+                    const key = el.getAttribute('data-key'); 
+                    if(t[key]) el.textContent = t[key];
+                });
+            }
+        }
+
+        // --- NAVIGATION ---
+        function handleAuth() {
+            const btn = document.querySelector('form button'); 
+            btn.innerHTML = '...';
+            setTimeout(() => { 
+                document.getElementById('auth-section').classList.remove('active'); 
+                document.getElementById('home-section').classList.add('active'); 
+                btn.innerHTML = `<span data-key="btn_continue">${translations[currentLang].btn_continue}</span>`;
+            }, 800);
+        }
+        
+        function logout() { location.reload(); }
+        function goHome() { document.getElementById('map-section').classList.remove('active'); document.getElementById('home-section').classList.add('active'); }
+
+        // --- REGISTRATION MODAL ---
+        function openModal() { 
+            document.getElementById('pet-modal').classList.add('open'); 
+            setTimeout(() => {
+                if(!safeZoneMap) {
+                    safeZoneMap = L.map('safe-zone-map', {zoomControl: false, dragging: true}).setView(DEFAULT_POS, 15);
+                    L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png').addTo(safeZoneMap);
+                    modalCircle = L.circle(DEFAULT_POS, { color: '#4f46e5', fillColor: '#4f46e5', fillOpacity: 0.2, radius: 150 }).addTo(safeZoneMap);
+                    const icon = L.divIcon({ className: 'bg-transparent', html: '<div class="text-3xl drop-shadow-lg">🏠</div>', iconSize: [30, 30], iconAnchor: [15, 15] });
+                    modalMarker = L.marker(DEFAULT_POS, {icon: icon}).addTo(safeZoneMap);
+                    safeZoneMap.on('move', () => { 
+                        const c = safeZoneMap.getCenter(); modalMarker.setLatLng(c); modalCircle.setLatLng(c); tempSafeZone = { lat: c.lat, lng: c.lng };
+                    });
+                } else { safeZoneMap.invalidateSize(); safeZoneMap.setView(DEFAULT_POS, 15); }
+            }, 300);
+        }
+        function closeModal() { document.getElementById('pet-modal').classList.remove('open'); }
+
+        // --- PHOTO LOGIC ---
+        const defaultIcon = "https://cdn-icons-png.flaticon.com/512/616/616408.png";
+        let currentPhoto = defaultIcon;
+        function previewPhoto(input) {
+            if (input.files && input.files[0]) {
+                const reader = new FileReader();
+                reader.onload = function(e) { document.getElementById('preview-image').src = e.target.result; currentPhoto = e.target.result; }
+                reader.readAsDataURL(input.files[0]);
+            }
+        }
+
+        // --- SAVE AND RENDER ---
+        function savePet() {
+            const name = document.getElementById('new-pet-name').value;
+            const id = document.getElementById('new-collar-id').value;
+            pets.push({ name, id, photo: currentPhoto, status: 'Safe', homeLat: tempSafeZone.lat, homeLng: tempSafeZone.lng });
+            document.getElementById('empty-state').style.display = 'none';
+            renderPetGrid(); closeModal();
+        }
+
+        function renderPetGrid() {
+            const grid = document.getElementById('pet-grid');
+            Array.from(grid.children).forEach(c => { if(c.id !== 'empty-state') grid.removeChild(c); });
+            const t = translations[currentLang];
+            pets.forEach((pet, index) => {
+                const card = document.createElement('div');
+                card.className = "bg-white p-5 rounded-3xl border border-slate-200 shadow-sm hover:shadow-md hover:border-indigo-500 transition-all cursor-pointer group flex items-center gap-5";
+                card.onclick = () => openMap(index);
+                card.innerHTML = `<div class="w-16 h-16 rounded-2xl overflow-hidden border-2 border-slate-100 shadow-sm flex-shrink-0"><img src="${pet.photo}" class="w-full h-full object-cover"></div><div class="flex-1"><div class="flex justify-between items-start"><h3 class="font-bold text-slate-800 text-lg">${pet.name}</h3><span class="px-2 py-0.5 bg-green-100 text-green-700 text-[10px] font-bold uppercase rounded-full tracking-wider">Active</span></div><p class="text-xs text-slate-400 font-mono tracking-wider mb-2 mt-0.5">ID: ${pet.id}</p><div class="flex items-center text-xs text-indigo-600 font-bold"><i class="ph-bold ph-map-pin mr-1"></i> <span data-key="track_now">${t.track_now}</span></div></div>`;
+                grid.appendChild(card);
+            });
+        }
+
+        // --- TRACKING MAP ---
+        function openMap(index) {
+            activePetIndex = index;
+            const pet = pets[index];
+            const homePos = [pet.homeLat, pet.homeLng];
+            
+            document.getElementById('home-section').classList.remove('active');
+            document.getElementById('map-section').classList.add('active');
+            document.getElementById('tracking-name').textContent = pet.name;
+            
+            setTimeout(() => {
+                if(!trackingMap) {
+                    trackingMap = L.map('tracking-map', {zoomControl: false});
+                    L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', { attribution: 'OSM' }).addTo(trackingMap);
+                }
+                trackingMap.invalidateSize();
+                
+                if(trackingMarker) trackingMap.removeLayer(trackingMarker);
+                if(trackingCircle) trackingMap.removeLayer(trackingCircle);
+                
+                trackingCircle = L.circle(homePos, { color: '#4f46e5', fillColor: '#4f46e5', fillOpacity: 0.1, radius: 150 }).addTo(trackingMap);
+                const iconHtml = `<div class="w-12 h-12 bg-white rounded-full border-4 border-green-500 shadow-2xl overflow-hidden"><img src="${pet.photo}" class="w-full h-full object-cover"></div>`;
+                const customIcon = L.divIcon({ className: 'custom', html: iconHtml, iconSize: [48, 48], iconAnchor: [24, 48] });
+                trackingMarker = L.marker(homePos, {icon: customIcon}).addTo(trackingMap);
+                
+                trackingMap.setView(homePos, 16);
+            }, 100);
+            
+            window.currentSimPet = pet; window.currentSimMarker = trackingMarker; window.currentSimCircle = trackingCircle;
+        }
+
+        // --- HARDWARE SIMULATION ---
+        function simulateBark() { 
+            document.getElementById('bark-modal').classList.remove('hidden'); 
+        }
+        function closeBarkModal() { 
+            document.getElementById('bark-modal').classList.add('hidden'); 
+        }
+        function simulateMove() {
+            if(!window.currentSimMarker) return;
+            const pet = pets[activePetIndex];
+            const outPos = [pet.homeLat + 0.002, pet.homeLng + 0.002]; // Move pet slightly
+            
+            window.currentSimMarker.setLatLng(outPos); 
+            trackingMap.flyTo(outPos, 16);
+            
+            // Trigger visual alert
+            document.getElementById('alert-overlay').classList.remove('hidden');
+            window.currentSimCircle.setStyle({ color: '#ef4444', fillColor: '#ef4444' });
+            window.currentSimMarker.getElement().querySelector('div').style.borderColor = '#ef4444';
+        }
+
+        // Init App
+        initLangSelector();
+        changeLang('en'); // Set default language
+    </script>
+</body>
+</html>
